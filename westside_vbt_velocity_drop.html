@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Westside Hybrid & VBT Tracker (Velocity Drop Audio Alert)</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --accent-de: #3b82f6;
+      --accent-me: #ef4444;
+      --accent-re: #10b981;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg-color); color: var(--text-main); padding: 16px; max-width: 850px; margin: 0 auto; line-height: 1.5; }
+
+    h1, h2, h3, h4 { margin-bottom: 10px; color: #fff; }
+    p { margin-bottom: 10px; color: var(--text-muted); font-size: 0.95rem; }
+
+    .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    
+    /* Method Selector Tabs */
+    .method-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab-btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; background: #334155; color: var(--text-muted); transition: all 0.2s; }
+    .tab-btn.active[data-method="DE"] { background: var(--accent-de); color: white; }
+    .tab-btn.active[data-method="ME"] { background: var(--accent-me); color: white; }
+    .tab-btn.active[data-method="RE"] { background: var(--accent-re); color: white; }
+
+    /* Form Controls */
+    label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
+    select, input, button { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: #0f172a; color: var(--text-main); font-size: 0.95rem; margin-bottom: 12px; }
+    button.primary-btn { background: #2563eb; color: white; font-weight: bold; border: none; cursor: pointer; }
+    button.primary-btn:hover { background: #1d4ed8; }
+    button.success-btn { background: #16a34a; color: white; font-weight: bold; border: none; cursor: pointer; }
+    button.danger-btn { background: #dc2626; color: white; font-weight: bold; border: none; cursor: pointer; }
+    button.bt-btn { background: #0284c7; color: white; font-weight: bold; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; display: inline-block; }
+    .status-dot.connected { background: #22c55e; }
+
+    /* Target Badge & Program Details */
+    .target-badge { padding: 10px 14px; border-radius: 6px; background: #0f172a; border-left: 4px solid var(--accent-de); margin-bottom: 12px; font-size: 0.95rem; }
+    .program-box { background: #0f172a; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; font-size: 0.9rem; border: 1px dashed var(--border-color); }
+    .program-box ul { padding-left: 20px; margin-top: 6px; }
+
+    /* Timer Displays */
+    .timer-card { display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 12px 16px; border-radius: 8px; margin-bottom: 12px; }
+
+    /* Workout Logger Table */
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border-color); }
+    th { color: var(--text-muted); font-weight: normal; }
+
+    .status-ok { color: #4ade80; font-weight: bold; }
+    .status-slow { color: #f87171; font-weight: bold; }
+
+    /* Modal */
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); padding: 16px; justify-content: center; align-items: center; z-index: 100; }
+    .modal.open { display: flex; }
+    .modal-content { background: var(--card-bg); width: 100%; max-width: 500px; border-radius: 12px; padding: 20px; max-height: 90vh; overflow-y: auto; }
+  </style>
+</head>
+<body>
+
+  <h1>Westside Hybrid & VBT Tracker</h1>
+  <p>Met automatische Velocity Drop detectie (audio alarm), PAP Floor Press base, VBT zones & rust-timer.</p>
+
+  <!-- Bluetooth Sensor Card -->
+  <div class="card" style="border: 1px solid #0284c7;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <strong style="display: flex; align-items: center; gap: 8px;">
+          <span id="btDot" class="status-dot"></span> VBT Queling Sensor
+        </strong>
+        <span id="btStatusText" style="font-size: 0.8rem; color: var(--text-muted);">Niet verbonden</span>
+      </div>
+      <button class="bt-btn" style="width: auto; margin: 0;" onclick="connectBluetoothSensor()">
+        ⚡ Koppel Sensor via Bluetooth
+      </button>
+    </div>
+  </div>
+
+  <!-- Velocity Drop Settings Card -->
+  <div class="card" style="border: 1px solid #f59e0b;">
+    <h3>⚠️ Velocity Loss / Drop Audio Alert</h3>
+    <p>Als de gemeten snelheid meer daalt dan de drempelwaarde t.o.v. de vorige rep of set-piek, speelt direct een waarschuwingssignaal af.</p>
+    <div class="grid-2">
+      <div>
+        <label>Maximale Snelheidsval (% Velocity Drop)</label>
+        <select id="velocityDropThreshold">
+          <option value="5">5% (Zeer strikt / DE Power Focus)</option>
+          <option value="10" selected>10% (DE / PAP Standaard)</option>
+          <option value="15">15% (ME Strength Limit)</option>
+          <option value="20">20% (RE Hypertrofie Threshold)</option>
+          <option value="30">30% (Max Fatigue Cutoff)</option>
+        </select>
+      </div>
+      <div>
+        <label>Vergelijkingsbasis</label>
+        <select id="velocityCompareBase">
+          <option value="prevRep" selected>T.o.v. Direct Vorige Rep</option>
+          <option value="firstRep">T.o.v. Eerste / Snelste Rep in Set</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timers Controller -->
+  <div class="card">
+    <h3>Sessie & Rust Timers</h3>
+    
+    <div class="timer-card">
+      <div>
+        <strong>Totale Sessieduur</strong>
+      </div>
+      <span id="timerDisplay" style="font-family: monospace; font-size: 1.3rem; color: #38bdf8;">00:00:00</span>
+    </div>
+
+    <!-- Rest Timer Setup -->
+    <div class="timer-card" style="border: 1px solid var(--border-color);">
+      <div>
+        <strong>Rust Timer (Audible Signal)</strong>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">Start automatisch na elke gelogde set</div>
+      </div>
+      <span id="restTimerDisplay" style="font-family: monospace; font-size: 1.5rem; color: #4ade80; font-weight: bold;">03:00</span>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label>Rusttijd Instellen</label>
+        <select id="restDurationSelect" onchange="resetRestTimer()">
+          <option value="30">30 seconden</option>
+          <option value="60">1 minuut</option>
+          <option value="90">1.5 minuut</option>
+          <option value="120">2 minuten</option>
+          <option value="180" selected>3 minuten (DE Standard)</option>
+          <option value="240">4 minuten</option>
+          <option value="300">5 minuten (ME Standard)</option>
+        </select>
+      </div>
+      <div style="display: flex; gap: 6px; align-items: flex-end;">
+        <button class="primary-btn" onclick="startRestTimer()" style="margin-bottom: 12px;">▶ Start Rest</button>
+        <button class="danger-btn" onclick="resetRestTimer()" style="margin-bottom: 12px;">⏹ Reset</button>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <button id="startBtn" class="primary-btn" onclick="toggleWorkout()">Start Workout</button>
+      <button id="endBtn" class="success-btn" onclick="endWorkout()" disabled>Beëindig & Sla Op</button>
+    </div>
+  </div>
+
+  <!-- Method Selector -->
+  <div class="method-tabs">
+    <button class="tab-btn active" data-method="DE" onclick="setMethod('DE')">Dynamic Effort (DE)</button>
+    <button class="tab-btn" data-method="ME" onclick="setMethod('ME')">Max Effort (ME)</button>
+    <button class="tab-btn" data-method="RE" onclick="setMethod('RE')">Repeated Effort (RE)</button>
+  </div>
+
+  <!-- Exercise & Target Profile Selection -->
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <label for="exerciseSelect">Selecteer Oefening</label>
+      <button style="width: auto; padding: 4px 10px; font-size: 0.8rem;" onclick="openNewExerciseModal()">+ Nieuwe Oefening</button>
+    </div>
+    <select id="exerciseSelect" onchange="updateTargetProfile()"></select>
+
+    <div id="targetProfileBadge" class="target-badge">
+      <!-- Target info loaded dynamically -->
+    </div>
+  </div>
+
+  <!-- Set Logger -->
+  <div class="card" id="loggerCard">
+    <h3>Set Loggen</h3>
+    <div class="grid-3">
+      <div>
+        <label>Gewicht (kg)</label>
+        <input type="number" id="inputWeight" placeholder="80" step="0.5">
+      </div>
+      <div>
+        <label>Reps</label>
+        <input type="number" id="inputReps" placeholder="3">
+      </div>
+      <div>
+        <label id="speedOrRpeLabel">Gem. Snelheid (m/s)</label>
+        <input type="number" id="inputMetric" placeholder="Live via Sensor..." step="0.01">
+      </div>
+    </div>
+    <button class="primary-btn" onclick="logSet()" id="logSetBtn" disabled>Log Set & Start Rust</button>
+  </div>
+
+  <!-- Current Workout Sets Table -->
+  <div class="card">
+    <h3>Gelogde Sets (Huidige Sessie)</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Methode</th>
+          <th>Oefening</th>
+          <th>Gewicht</th>
+          <th>Reps</th>
+          <th>Snelheid/RPE</th>
+          <th>Velocity Drop</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="currentSetsTable">
+        <tr><td colspan="8" style="color: var(--text-muted); text-align: center;">Nog geen sets gelogd in deze sessie.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal for New Exercise -->
+  <div class="modal" id="exerciseModal">
+    <div class="modal-content">
+      <h3>Nieuwe Oefening / Profiel Toevoegen</h3>
+      <label>Naam Oefening</label>
+      <input type="text" id="newExName" placeholder="bijv. Board Press">
+
+      <h4>VBT & Method Targets</h4>
+      <div class="grid-2">
+        <div>
+          <label>DE Min Snelheid (m/s)</label>
+          <input type="number" id="newExDeMin" value="0.75" step="0.01">
+        </div>
+        <div>
+          <label>DE Max Snelheid (m/s)</label>
+          <input type="number" id="newExDeMax" value="0.85" step="0.01">
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <label>ME Target Reps</label>
+          <input type="text" id="newExMeReps" value="1-3 RM">
+        </div>
+        <div>
+          <label>ME Target RPE</label>
+          <input type="number" id="newExMeRpe" value="9.5" step="0.5">
+        </div>
+      </div>
+
+      <label>RE Target Reps & Sets</label>
+      <input type="text" id="newExReTarget" value="3-4 sets x 8-12 reps @ RPE 8-9">
+
+      <div class="grid-2" style="margin-top: 12px;">
+        <button class="primary-btn" onclick="saveNewExercise()">Opslaan</button>
+        <button class="danger-btn" onclick="closeNewExerciseModal()">Annuleren</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State Management
+    let currentMethod = 'DE';
+    let workoutActive = false;
+    let timerInterval = null;
+    let secondsElapsed = 0;
+    let currentSessionSets = [];
+    let lastVelocity = null; // Ter vergelijking van rep-to-rep velocity drop
+
+    // Rest Timer State
+    let restInterval = null;
+    let restTimeRemaining = 180;
+
+    // Web Audio Context
+    let audioCtx = null;
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      return audioCtx;
+    }
+
+    // Double beep for rest timer completion
+    function playRestEndBeep() {
+      try {
+        const ctx = getAudioContext();
+        let osc = ctx.createOscillator();
+        let gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+
+        setTimeout(() => {
+          let osc2 = ctx.createOscillator();
+          let gain2 = ctx.createGain();
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(1100, ctx.currentTime);
+          gain2.gain.setValueAtTime(0.4, ctx.currentTime);
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.start();
+          osc2.stop(ctx.currentTime + 0.25);
+        }, 200);
+      } catch(e) {
+        console.log("Audio play error:", e);
+      }
+    }
+
+    // Distinct Warning Buzzer for Velocity Loss exceed
+    function playVelocityDropWarning() {
+      try {
+        const ctx = getAudioContext();
+        let osc = ctx.createOscillator();
+        let gain = ctx.createGain();
+        osc.type = 'sawtooth'; // Scherp geluid voor directe attentie
+        osc.frequency.setValueAtTime(220, ctx.currentTime); // Lage waarschuwingstoon (A3)
+        osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.4); // Drop pitch
+        gain.gain.setValueAtTime(0.5, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } catch(e) {
+        console.log("Audio warning error:", e);
+      }
+    }
+
+    function checkVelocityDropAlert(newVelocity) {
+      if (lastVelocity === null || isNaN(newVelocity)) {
+        lastVelocity = newVelocity;
+        return { dropPct: 0, triggered: false };
+      }
+
+      const dropPct = ((lastVelocity - newVelocity) / lastVelocity) * 100;
+      const threshold = parseFloat(document.getElementById('velocityDropThreshold').value);
+
+      let triggered = false;
+      if (dropPct >= threshold) {
+        triggered = true;
+        playVelocityDropWarning();
+      }
+
+      // Update base if required by setting
+      const mode = document.getElementById('velocityCompareBase').value;
+      if (mode === 'prevRep') {
+        lastVelocity = newVelocity;
+      } else if (newVelocity > lastVelocity) {
+        // First/Peak mode: replace if faster
+        lastVelocity = newVelocity;
+      }
+
+      return { dropPct: Math.max(0, dropPct).toFixed(1), triggered: triggered };
+    }
+
+    function startRestTimer() {
+      clearInterval(restInterval);
+      const selectedDuration = parseInt(document.getElementById('restDurationSelect').value);
+      if (restTimeRemaining <= 0 || restTimeRemaining > selectedDuration) {
+        restTimeRemaining = selectedDuration;
+      }
+
+      updateRestTimerDisplay();
+
+      restInterval = setInterval(() => {
+        restTimeRemaining--;
+        updateRestTimerDisplay();
+
+        if (restTimeRemaining <= 0) {
+          clearInterval(restInterval);
+          playRestEndBeep();
+          document.getElementById('restTimerDisplay').style.color = '#ef4444';
+        }
+      }, 1000);
+    }
+
+    function resetRestTimer() {
+      clearInterval(restInterval);
+      restTimeRemaining = parseInt(document.getElementById('restDurationSelect').value);
+      document.getElementById('restTimerDisplay').style.color = '#4ade80';
+      updateRestTimerDisplay();
+    }
+
+    function updateRestTimerDisplay() {
+      const mins = String(Math.floor(Math.max(0, restTimeRemaining) / 60)).padStart(2, '0');
+      const secs = String(Math.max(0, restTimeRemaining) % 60).padStart(2, '0');
+      document.getElementById('restTimerDisplay').innerText = `${mins}:${secs}`;
+    }
+
+    // Bluetooth Variables
+    let bleDevice = null;
+    let gattServer = null;
+
+    const VBT_SERVICE_UUID = '0000180d-0000-1000-8000-00805f9b34fb';
+    const VBT_CHARACTERISTIC_UUID = '00002a37-0000-1000-8000-00805f9b34fb';
+
+    // Pre-loaded Exercise Database
+    let exercises = JSON.parse(localStorage.getItem('westside_exercises')) || {
+      "Floor Press (PAP Base)": {
+        DE: { minSpeed: 0.75, maxSpeed: 0.85, notes: "Inclusief PAP prep protocol" },
+        ME: { target: "1-3 RM", rpe: 9.5, notes: "Max rekrutering motor-units" },
+        RE: { target: "3-4 sets x 8-12 reps", notes: "Volume & triceps/borst hypertrofie" }
+      },
+      "Bench Press": {
+        DE: { minSpeed: 0.80, maxSpeed: 0.90, notes: "Explosieve concentric focus" },
+        ME: { target: "1 RM", rpe: 10, notes: "Top single test" },
+        RE: { target: "AMRAP sets @ RPE 8-9", notes: "Submaximaal tot nabij spierfalen" }
+      },
+      "Low Box Squat": {
+        DE: { minSpeed: 0.60, maxSpeed: 0.70, notes: "Snelheid uit de bodem" },
+        ME: { target: "1-3 RM", rpe: 9.5, notes: "Heup dominantie" },
+        RE: { target: "4 sets x 6-8 reps", notes: "Hypertrofie onderlichaam" }
+      }
+    };
+
+    let workoutHistory = JSON.parse(localStorage.getItem('westside_history')) || [];
+
+    window.onload = function() {
+      populateExerciseSelect();
+      updateTargetProfile();
+      resetRestTimer();
+    };
+
+    // Bluetooth Connection Method
+    async function connectBluetoothSensor() {
+      const btStatusText = document.getElementById('btStatusText');
+      const btDot = document.getElementById('btDot');
+
+      if (!navigator.bluetooth) {
+        alert("Web Bluetooth wordt niet ondersteund door deze browser. Gebruik Chrome op Android/PC, of de WebBLE/Bluefy app op iOS.");
+        return;
+      }
+
+      try {
+        btStatusText.innerText = "Zoeken naar Queling sensor...";
+        
+        bleDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [VBT_SERVICE_UUID, 'battery_service']
+        });
+
+        btStatusText.innerText = "Verbinden met " + bleDevice.name + "...";
+        gattServer = await bleDevice.gatt.connect();
+
+        btDot.classList.add('connected');
+        btStatusText.innerText = "Verbonden: " + (bleDevice.name || "VBT Sensor");
+
+        bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+        try {
+          const service = await gattServer.getPrimaryService(VBT_SERVICE_UUID);
+          const characteristic = await service.getCharacteristic(VBT_CHARACTERISTIC_UUID);
+          await characteristic.startNotifications();
+          characteristic.addEventListener('characteristicvaluechanged', handleSensorData);
+        } catch(e) {
+          console.log("Servicerequest gelukt, opvragen specifieke UUID stream:", e);
+        }
+
+      } catch (error) {
+        console.error("Bluetooth Fout:", error);
+        btStatusText.innerText = "Koppeling mislukt of geannuleerd";
+        btDot.classList.remove('connected');
+      }
+    }
+
+    function onDisconnected() {
+      document.getElementById('btDot').classList.remove('connected');
+      document.getElementById('btStatusText').innerText = "Verbinding verbroken";
+    }
+
+    function handleSensorData(event) {
+      const value = event.target.value;
+      let speedMs = value.getFloat32(0, true); 
+      if (isNaN(speedMs) || speedMs <= 0) {
+        speedMs = value.getUint8(0) / 100.0;
+      }
+      
+      document.getElementById('inputMetric').value = speedMs.toFixed(2);
+      
+      // Auto velocity drop check op live sensor measurement
+      checkVelocityDropAlert(speedMs);
+    }
+
+    function setMethod(method) {
+      currentMethod = method;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.method === method);
+      });
+      
+      const metricLabel = document.getElementById('speedOrRpeLabel');
+      if (method === 'DE') {
+        metricLabel.innerText = "Gem. Snelheid (m/s)";
+        document.getElementById('restDurationSelect').value = "180";
+        document.getElementById('velocityDropThreshold').value = "10";
+      } else if (method === 'ME') {
+        metricLabel.innerText = "RPE (1-10)";
+        document.getElementById('restDurationSelect').value = "300";
+        document.getElementById('velocityDropThreshold').value = "15";
+      } else {
+        metricLabel.innerText = "RPE / Snelheid (m/s)";
+        document.getElementById('restDurationSelect').value = "90";
+        document.getElementById('velocityDropThreshold').value = "20";
+      }
+
+      lastVelocity = null; // Reset velocity base bei methode change
+      resetRestTimer();
+      updateTargetProfile();
+    }
+
+    function populateExerciseSelect() {
+      const select = document.getElementById('exerciseSelect');
+      select.innerHTML = '';
+      Object.keys(exercises).forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.innerText = name;
+        select.appendChild(option);
+      });
+    }
+
+    function updateTargetProfile() {
+      const exName = document.getElementById('exerciseSelect').value;
+      const profile = exercises[exName];
+      const badge = document.getElementById('targetProfileBadge');
+
+      if (!profile) return;
+
+      if (currentMethod === 'DE') {
+        badge.style.borderLeftColor = 'var(--accent-de)';
+        badge.innerHTML = `<strong>DE Target:</strong> ${profile.DE.minSpeed} - ${profile.DE.maxSpeed} m/s | <em>${profile.DE.notes}</em>`;
+      } else if (currentMethod === 'ME') {
+        badge.style.borderLeftColor = 'var(--accent-me)';
+        badge.innerHTML = `<strong>ME Target:</strong> ${profile.ME.target} @ RPE ${profile.ME.rpe || '9.5+'} | <em>${profile.ME.notes}</em>`;
+      } else {
+        badge.style.borderLeftColor = 'var(--accent-re)';
+        badge.innerHTML = `<strong>RE Target:</strong> ${profile.RE.target} | <em>${profile.RE.notes}</em>`;
+      }
+    }
+
+    function toggleWorkout() {
+      if (!workoutActive) {
+        workoutActive = true;
+        secondsElapsed = 0;
+        currentSessionSets = [];
+        lastVelocity = null;
+        document.getElementById('startBtn').innerText = "Pauzeer Sessie";
+        document.getElementById('endBtn').disabled = false;
+        document.getElementById('logSetBtn').disabled = false;
+        
+        timerInterval = setInterval(() => {
+          secondsElapsed++;
+          const hrs = String(Math.floor(secondsElapsed / 3600)).padStart(2, '0');
+          const mins = String(Math.floor((secondsElapsed % 3600) / 60)).padStart(2, '0');
+          const secs = String(secondsElapsed % 60).padStart(2, '0');
+          document.getElementById('timerDisplay').innerText = `${hrs}:${mins}:${secs}`;
+        }, 1000);
+      } else {
+        workoutActive = false;
+        clearInterval(timerInterval);
+        document.getElementById('startBtn').innerText = "Hervat Sessie";
+      }
+    }
+
+    function logSet() {
+      const exName = document.getElementById('exerciseSelect').value;
+      const weight = parseFloat(document.getElementById('inputWeight').value);
+      const reps = parseInt(document.getElementById('inputReps').value);
+      const metric = parseFloat(document.getElementById('inputMetric').value);
+
+      if (!weight || !reps || isNaN(metric)) {
+        alert('Vul a.u.b. gewicht, reps en snelheid/RPE in.');
+        return;
+      }
+
+      // Calculate velocity drop on manual set log if not already checked
+      const dropRes = checkVelocityDropAlert(metric);
+
+      let status = "-";
+      if (currentMethod === 'DE') {
+        const target = exercises[exName].DE;
+        if (metric >= target.minSpeed) {
+          status = `<span class="status-ok">SNEL (${metric} m/s)</span>`;
+        } else {
+          status = `<span class="status-slow">TE TRAG (&lt;${target.minSpeed})</span>`;
+        }
+      } else {
+        status = `RPE ${metric}`;
+      }
+
+      const setObj = {
+        setNum: currentSessionSets.length + 1,
+        method: currentMethod,
+        exercise: exName,
+        weight: weight,
+        reps: reps,
+        metric: metric,
+        dropFormatted: dropRes.triggered ? `<span style="color:#ef4444; font-weight:bold;">⚠️ -${dropRes.dropPct}%</span>` : `-${dropRes.dropPct}%`,
+        statusFormatted: status
+      };
+
+      currentSessionSets.push(setObj);
+      renderCurrentSets();
+      document.getElementById('inputMetric').value = '';
+
+      // Auto-start rest timer na het loggen van een set
+      resetRestTimer();
+      startRestTimer();
+    }
+
+    function renderCurrentSets() {
+      const tbody = document.getElementById('currentSetsTable');
+      if (currentSessionSets.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="color: var(--text-muted); text-align: center;">Nog geen sets gelogd in deze sessie.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = '';
+      currentSessionSets.forEach(s => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${s.setNum}</td>
+          <td><strong>${s.method}</strong></td>
+          <td>${s.exercise}</td>
+          <td>${s.weight} kg</td>
+          <td>${s.reps}</td>
+          <td>${s.metric}</td>
+          <td>${s.dropFormatted}</td>
+          <td>${s.statusFormatted}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function endWorkout() {
+      if (currentSessionSets.length === 0) {
+        alert("Geen sets om op te slaan.");
+        return;
+      }
+
+      clearInterval(timerInterval);
+      clearInterval(restInterval);
+      workoutActive = false;
+
+      const sessionRecord = {
+        id: Date.now(),
+        date: new Date().toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        duration: document.getElementById('timerDisplay').innerText,
+        sets: currentSessionSets
+      };
+
+      workoutHistory.unshift(sessionRecord);
+      localStorage.setItem('westside_history', JSON.stringify(workoutHistory));
+
+      document.getElementById('startBtn').innerText = "Start Workout";
+      document.getElementById('endBtn').disabled = true;
+      document.getElementById('logSetBtn').disabled = true;
+      document.getElementById('timerDisplay').innerText = "00:00:00";
+      currentSessionSets = [];
+      lastVelocity = null;
+      renderCurrentSets();
+
+      alert("Workout succesvol opgeslagen!");
+    }
+
+    function openNewExerciseModal() {
+      document.getElementById('exerciseModal').classList.add('open');
+    }
+
+    function closeNewExerciseModal() {
+      document.getElementById('exerciseModal').classList.remove('open');
+    }
+
+    function saveNewExercise() {
+      const name = document.getElementById('newExName').value.trim();
+      if (!name) {
+        alert("Vul een naam in.");
+        return;
+      }
+
+      exercises[name] = {
+        DE: {
+          minSpeed: parseFloat(document.getElementById('newExDeMin').value) || 0.75,
+          maxSpeed: parseFloat(document.getElementById('newExDeMax').value) || 0.85,
+          notes: "Uniek DE VBT profiel"
+        },
+        ME: {
+          target: document.getElementById('newExMeReps').value || "1-3 RM",
+          rpe: parseFloat(document.getElementById('newExMeRpe').value) || 9.5,
+          notes: "Max effort profiel"
+        },
+        RE: {
+          target: document.getElementById('newExReTarget').value || "3-4 sets x 8-12 reps",
+          notes: "Repeated effort profiel"
+        }
+      };
+
+      localStorage.setItem('westside_exercises', JSON.stringify(exercises));
+      populateExerciseSelect();
+      document.getElementById('exerciseSelect').value = name;
+      updateTargetProfile();
+      closeNewExerciseModal();
+    }
+  </script>
+</body>
+</html>
