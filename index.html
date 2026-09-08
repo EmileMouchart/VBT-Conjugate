@@ -8,7 +8,6 @@
     :root {
       --bg-color: #0f172a;
       --card-bg: #1e293b;
-      --accent-de: #3b82f6;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
       --border-color: #334155;
@@ -34,7 +33,7 @@
       font-size: 0.75rem;
       padding: 10px;
       border-radius: 6px;
-      height: 150px;
+      height: 180px;
       overflow-y: auto;
       border: 1px solid #334155;
       white-space: pre-wrap;
@@ -43,7 +42,7 @@
 </head>
 <body>
 
-  <h1>Westside VBT Auto-Connect</h1>
+  <h1>Westside VBT Auto-Connect ($ENCODE)</h1>
 
   <!-- Bluetooth Controller -->
   <div class="card" style="border: 1px solid #0284c7;">
@@ -60,10 +59,10 @@
     </div>
   </div>
 
-  <!-- Live Speed Input & Drop Warning -->
+  <!-- Live Speed Input -->
   <div class="card">
     <label>Gemeten Snelheid (m/s)</label>
-    <input type="number" id="inputMetric" placeholder="Trek aan het koord..." step="0.01" style="font-size: 1.5rem; text-align: center; font-weight: bold; color: #38bdf8;">
+    <input type="number" id="inputMetric" placeholder="Trek aan het koord..." step="0.01" style="font-size: 2rem; text-align: center; font-weight: bold; color: #38bdf8;">
   </div>
 
   <!-- Debug Console -->
@@ -92,10 +91,10 @@
       const btDot = document.getElementById('btDot');
 
       try {
-        logDebug("Zoeken naar Bluetooth apparaten...");
+        logDebug("Zoeken naar $ENCODE sensor...");
         bleDevice = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
-          optionalServices: [NUS_SERVICE_UUID, '0000fff0-0000-1000-8000-00805f9b34fb']
+          optionalServices: [NUS_SERVICE_UUID]
         });
 
         logDebug("Verbinden met: " + bleDevice.name);
@@ -104,36 +103,27 @@
         btDot.classList.add('connected');
         btStatusText.innerText = "Verbonden: " + bleDevice.name;
 
-        // Ophalen van de Nordic UART Service
+        // Service ophalen
         const service = await server.getPrimaryService(NUS_SERVICE_UUID);
 
-        // RX Kanaal (Luisteren naar data)
+        // RX Kanaal Notificaties Activeren
         rxChar = await service.getCharacteristic(NUS_RX_UUID);
         await rxChar.startNotifications();
         rxChar.addEventListener('characteristicvaluechanged', handleSensorData);
-        logDebug("✔️ Luisteren op RX kanaal gestart.");
+        logDebug("✔️ Notificaties op RX (0003) succesvol ingeschakeld!");
 
-        // TX Kanaal (Versturen van activatie-pingen)
+        // TX Kanaal (0100 en 02 triggers versturen)
         try {
           txChar = await service.getCharacteristic(NUS_TX_UUID);
-          logDebug("Versturen van activatiesignalen...");
-
-          // Reeks van bekende VBT start-commando's versturen
-          const initCmds = [
-            new Uint8Array([0x01]),                     // Standard Nordic Start
-            new Uint8Array([0xA5, 0x01, 0x01, 0x5A]),   // Queling/Encode Header Init
-            new Uint8Array([0xAA, 0x02, 0x01, 0xBB]),   // Binary Stream Trigger
-            new Uint8Array([0x00, 0x01]),               // Simple Enable
-            new Uint8Array([0x53, 0x54, 0x41, 0x52, 0x54]) // ASCII 'START'
-          ];
-
-          for (let cmd of initCmds) {
-            await txChar.writeValueWithoutResponse(cmd).catch(e => {});
-          }
-          logDebug("✔️ Signalen verzonden. Trek krachtig aan het koord!");
+          
+          // Stuur de 0100 en 02 pings die in nRF Connect de uitslag gaven
+          logDebug("Versturen van activatie-pings (0100 & 02)...");
+          await txChar.writeValueWithoutResponse(new Uint8Array([0x01, 0x00]));
+          await txChar.writeValueWithoutResponse(new Uint8Array([0x02]));
+          logDebug("✔️ Sensor geactiveerd! Trek nu aan het koord.");
 
         } catch(e) {
-          logDebug("TX-kanaal melding: " + e.message);
+          logDebug("TX-kanaal info: " + e.message);
         }
 
       } catch (error) {
@@ -148,25 +138,27 @@
       let bytes = new Uint8Array(value.buffer);
       let hexArray = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
       
-      logDebug(`🔥 DATA ONTVANGEN: [ ${hexArray} ]`);
+      logDebug(`🔥 UITSLAAG ONTVANGEN: [ ${hexArray} ]`);
 
       let inputEl = document.getElementById('inputMetric');
       let valFloat = null;
 
-      // 1. Textuele/ASCII conversie
-      const decoder = new TextDecoder('utf-8');
-      const textVal = decoder.decode(value).replace(/[^0-9.]/g, '').trim();
-      if (textVal.length > 0 && !isNaN(parseFloat(textVal))) {
-        valFloat = parseFloat(textVal);
-      } 
-      // 2. Binary Unpacking (High-Byte / Low-Byte)
-      else if (bytes.length >= 2) {
+      // Unpack binary data (High Byte / Low Byte conversie)
+      if (bytes.length >= 2) {
         let rawInt = (bytes[0] << 8) | bytes[1];
         if (rawInt === 0 && bytes.length >= 4) {
           rawInt = (bytes[2] << 8) | bytes[3];
         }
         if (rawInt > 0) {
           valFloat = rawInt > 500 ? rawInt / 1000.0 : rawInt / 100.0;
+        }
+      }
+
+      // ASCII Fallback
+      if (valFloat === null) {
+        const textVal = new TextDecoder().decode(value).replace(/[^0-9.]/g, '').trim();
+        if (textVal.length > 0 && !isNaN(parseFloat(textVal))) {
+          valFloat = parseFloat(textVal);
         }
       }
 
