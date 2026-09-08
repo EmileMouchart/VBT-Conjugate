@@ -466,41 +466,47 @@
 
 function handleSensorData(event) {
   const value = event.target.value;
+  const inputEl = document.getElementById('inputMetric');
   
-  // 1. Probeer de data als ruwe bytes te lezen (Uint8 array)
+  // Maak een array van alle losse bytes die binnenkomen
   let bytes = new Uint8Array(value.buffer);
-  console.log("Ruwe bytes van sensor:", Array.from(bytes));
+  
+  // TEST: Laat direct in het vakje zien dat er data BINNENKOMT (zo weet je dat de trigger werkt!)
+  console.log("Raw sensor bytes:", Array.from(bytes));
 
-  let speedMs = 0;
+  let detectedSpeed = null;
 
-  // 2. Scenario A: Data komt binnen als 2 bytes (bijv. [0, 85] = 0.85 m/s of mm/s)
-  if (value.byteLength >= 2) {
-    // Probeer 16-bit integer (snelheid in cm/s of mm/s)
-    let rawInt = value.getUint16(0, true); // Little endian
-    
-    if (rawInt > 0 && rawInt < 500) { 
-      // Veronderstel cm/s -> omrekenen naar m/s
-      speedMs = rawInt / 100.0; 
-    } else if (rawInt >= 500 && rawInt < 5000) {
-      // Veronderstel mm/s -> omrekenen naar m/s
-      speedMs = rawInt / 1000.0;
+  // Optie A: Probeer te lezen als ASCII tekst (bijv. "0.75")
+  const decoder = new TextDecoder('utf-8');
+  const textVal = decoder.decode(value).trim();
+  if (!isNaN(parseFloat(textVal))) {
+    detectedSpeed = parseFloat(textVal);
+  }
+
+  // Optie B: Probeer te lezen als ruwe getallen (bijv. 75 = 0.75 m/s)
+  if (detectedSpeed === null && bytes.length > 0) {
+    // Neem de eerste niet-nul byte
+    for (let b of bytes) {
+      if (b > 0) {
+        detectedSpeed = b > 20 ? b / 100.0 : b; // Als b=75 -> 0.75 m/s
+        break;
+      }
     }
   }
 
-  // 3. Scenario B: ASCII tekst fallback (voor het geval er toch tekst meekomt)
-  if (speedMs === 0) {
-    const decoder = new TextDecoder('utf-8');
-    const text = decoder.decode(value).replace(/[^0-9.]/g, ''); // Filter alleen cijfers en punten
-    speedMs = parseFloat(text);
-  }
+  // Schrijf het resultaat DIRECT in het invoerveld
+  if (detectedSpeed !== null) {
+    inputEl.value = detectedSpeed.toFixed(2);
+    inputEl.style.backgroundColor = '#1e3a5f'; // Korte visuele 'flash' dat er data is verwerkt
+    setTimeout(() => inputEl.style.backgroundColor = '#0f172a', 300);
 
-  // 4. Als er een geldige snelheid is berekend, vul deze direct in
-  if (!isNaN(speedMs) && speedMs > 0 && speedMs < 5.0) {
-    document.getElementById('inputMetric').value = speedMs.toFixed(2);
-    checkVelocityDropAlert(speedMs);
+    // Controleer de velocity drop
+    checkVelocityDropAlert(detectedSpeed);
+  } else {
+    // Laat zien dat er wél data is ontvangen, maar dat het 0 was
+    inputEl.placeholder = "Data ontvangen (" + bytes.length + " bytes)...";
   }
 }
-
     function setMethod(method) {
       currentMethod = method;
       document.querySelectorAll('.tab-btn').forEach(btn => {
