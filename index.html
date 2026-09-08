@@ -22,9 +22,12 @@
     label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
     input, button { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: #0f172a; color: var(--text-main); font-size: 0.95rem; margin-bottom: 8px; }
     button.bt-btn { background: #0284c7; color: white; font-weight: bold; border: none; cursor: pointer; }
+    button.sub-btn { background: #334155; color: white; border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; }
 
     .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; display: inline-block; margin-right: 6px; }
     .status-dot.connected { background: #22c55e; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
     #debugBox {
       background: #000;
@@ -33,7 +36,7 @@
       font-size: 0.75rem;
       padding: 10px;
       border-radius: 6px;
-      height: 180px;
+      height: 200px;
       overflow-y: auto;
       border: 1px solid #334155;
       white-space: pre-wrap;
@@ -56,6 +59,12 @@
       <button class="bt-btn" style="width: auto; margin: 0;" onclick="connectBluetoothSensor()">
         ⚡ Koppel Sensor
       </button>
+    </div>
+
+    <!-- Handmatige Triggers -->
+    <div class="grid-2" style="margin-top: 10px;">
+      <button class="sub-btn" onclick="sendTrigger([0x01, 0x00])">Stuur 0100 Ping</button>
+      <button class="sub-btn" onclick="sendTrigger([0x02])">Stuur 02 Ping</button>
     </div>
   </div>
 
@@ -97,7 +106,7 @@
           optionalServices: [NUS_SERVICE_UUID]
         });
 
-        logDebug("Verbinden met: " + bleDevice.name);
+        logDebug("Verbinden met GATT Server...");
         const server = await bleDevice.gatt.connect();
 
         btDot.classList.add('connected');
@@ -105,31 +114,61 @@
 
         // Service ophalen
         const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+        logDebug("✔️ Service 6e400001 gevonden.");
 
-        // RX Kanaal Notificaties Activeren
+        // 1. RX Kanaal Notificaties Activeren
         rxChar = await service.getCharacteristic(NUS_RX_UUID);
-        await rxChar.startNotifications();
+        
+        // Event listener koppelen VOORDAT notificaties starten
+        rxChar.removeEventListener('characteristicvaluechanged', handleSensorData);
         rxChar.addEventListener('characteristicvaluechanged', handleSensorData);
-        logDebug("✔️ Notificaties op RX (0003) succesvol ingeschakeld!");
+        
+        await rxChar.startNotifications();
+        logDebug("✔️ Notificaties op RX (0003) gestart.");
 
-        // TX Kanaal (0100 en 02 triggers versturen)
+        // 2. TX Kanaal ophalen en pings sturen
         try {
           txChar = await service.getCharacteristic(NUS_TX_UUID);
-          
-          // Stuur de 0100 en 02 pings die in nRF Connect de uitslag gaven
-          logDebug("Versturen van activatie-pings (0100 & 02)...");
-          await txChar.writeValueWithoutResponse(new Uint8Array([0x01, 0x00]));
-          await txChar.writeValueWithoutResponse(new Uint8Array([0x02]));
-          logDebug("✔️ Sensor geactiveerd! Trek nu aan het koord.");
+          logDebug("✔️ TX (0002) kanaal gekoppeld.");
+
+          // Korte pauze voor stabiele handshake
+          await new Promise(r => setTimeout(r, 300));
+
+          await sendTrigger([0x01, 0x00]);
+          await new Promise(r => setTimeout(r, 100));
+          await sendTrigger([0x02]);
+
+          logDebug("🚀 KLAAR! Trek krachtig aan het koord.");
 
         } catch(e) {
-          logDebug("TX-kanaal info: " + e.message);
+          logDebug("⚠️ Fout bij TX opzetten: " + e.message);
         }
 
       } catch (error) {
-        logDebug("FOUT: " + error.message);
+        logDebug("❌ FOUT: " + error.message);
         btStatusText.innerText = "Koppeling mislukt";
         btDot.classList.remove('connected');
+      }
+    }
+
+    async function sendTrigger(byteArray) {
+      if (!txChar) {
+        logDebug("⚠️ Kan trigger niet sturen: Geen TX verbinding.");
+        return;
+      }
+      try {
+        const data = new Uint8Array(byteArray);
+        let hexStr = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        
+        // Probeer Write without response, anders gewone Write
+        if (txChar.properties.writeWithoutResponse) {
+          await txChar.writeValueWithoutResponse(data);
+        } else {
+          await txChar.writeValueWithResponse(data);
+        }
+        logDebug(`➡️ Ping verzonden naar 0002: [ ${hexStr} ]`);
+      } catch(e) {
+        logDebug(`❌ Mislukt ping te sturen: ${e.message}`);
       }
     }
 
