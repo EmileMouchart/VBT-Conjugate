@@ -267,7 +267,7 @@
     let timerInterval = null;
     let secondsElapsed = 0;
     let currentSessionSets = [];
-    let lastVelocity = null; // Ter vergelijking van rep-to-rep velocity drop
+    let lastVelocity = null;
 
     // Rest Timer State
     let restInterval = null;
@@ -283,7 +283,6 @@
       return audioCtx;
     }
 
-    // Double beep for rest timer completion
     function playRestEndBeep() {
       try {
         const ctx = getAudioContext();
@@ -313,15 +312,14 @@
       }
     }
 
-    // Distinct Warning Buzzer for Velocity Loss exceed
     function playVelocityDropWarning() {
       try {
         const ctx = getAudioContext();
         let osc = ctx.createOscillator();
         let gain = ctx.createGain();
-        osc.type = 'sawtooth'; // Scherp geluid voor directe attentie
-        osc.frequency.setValueAtTime(220, ctx.currentTime); // Lage waarschuwingstoon (A3)
-        osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.4); // Drop pitch
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.4);
         gain.gain.setValueAtTime(0.5, ctx.currentTime);
         osc.connect(gain);
         gain.connect(ctx.destination);
@@ -347,12 +345,10 @@
         playVelocityDropWarning();
       }
 
-      // Update base if required by setting
       const mode = document.getElementById('velocityCompareBase').value;
       if (mode === 'prevRep') {
         lastVelocity = newVelocity;
       } else if (newVelocity > lastVelocity) {
-        // First/Peak mode: replace if faster
         lastVelocity = newVelocity;
       }
 
@@ -400,7 +396,6 @@
     const VBT_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
     const VBT_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
-    // Pre-loaded Exercise Database
     let exercises = JSON.parse(localStorage.getItem('westside_exercises')) || {
       "Floor Press (PAP Base)": {
         DE: { minSpeed: 0.75, maxSpeed: 0.85, notes: "Inclusief PAP prep protocol" },
@@ -427,7 +422,6 @@
       resetRestTimer();
     };
 
-    // Bluetooth Connection Method
     async function connectBluetoothSensor() {
       const btStatusText = document.getElementById('btStatusText');
       const btDot = document.getElementById('btDot');
@@ -453,14 +447,10 @@
 
         bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
-        try {
-          const service = await gattServer.getPrimaryService(VBT_SERVICE_UUID);
-          const characteristic = await service.getCharacteristic(VBT_CHARACTERISTIC_UUID);
-          await characteristic.startNotifications();
-          characteristic.addEventListener('characteristicvaluechanged', handleSensorData);
-        } catch(e) {
-          console.log("Servicerequest gelukt, opvragen specifieke UUID stream:", e);
-        }
+        const service = await gattServer.getPrimaryService(VBT_SERVICE_UUID);
+        const characteristic = await service.getCharacteristic(VBT_CHARACTERISTIC_UUID);
+        await characteristic.startNotifications();
+        characteristic.addEventListener('characteristicvaluechanged', handleSensorData);
 
       } catch (error) {
         console.error("Bluetooth Fout:", error);
@@ -474,17 +464,21 @@
       document.getElementById('btStatusText').innerText = "Verbinding verbroken";
     }
 
+    // AANGEPASTE VERWERKING VAN NORDIC UART DATA (ASCII STRINGS)
     function handleSensorData(event) {
       const value = event.target.value;
-      let speedMs = value.getFloat32(0, true); 
-      if (isNaN(speedMs) || speedMs <= 0) {
-        speedMs = value.getUint8(0) / 100.0;
+      const decoder = new TextDecoder('utf-8');
+      const text = decoder.decode(value).trim();
+      
+      console.log("Inkomende raw sensor data:", text);
+
+      // Zoek naar getallen in de inkomende tekst
+      const speedMs = parseFloat(text);
+
+      if (!isNaN(speedMs) && speedMs > 0) {
+        document.getElementById('inputMetric').value = speedMs.toFixed(2);
+        checkVelocityDropAlert(speedMs);
       }
-      
-      document.getElementById('inputMetric').value = speedMs.toFixed(2);
-      
-      // Auto velocity drop check op live sensor measurement
-      checkVelocityDropAlert(speedMs);
     }
 
     function setMethod(method) {
@@ -508,7 +502,7 @@
         document.getElementById('velocityDropThreshold').value = "20";
       }
 
-      lastVelocity = null; // Reset velocity base bei methode change
+      lastVelocity = null;
       resetRestTimer();
       updateTargetProfile();
     }
@@ -578,7 +572,6 @@
         return;
       }
 
-      // Calculate velocity drop on manual set log if not already checked
       const dropRes = checkVelocityDropAlert(metric);
 
       let status = "-";
@@ -608,7 +601,6 @@
       renderCurrentSets();
       document.getElementById('inputMetric').value = '';
 
-      // Auto-start rest timer na het loggen van een set
       resetRestTimer();
       startRestTimer();
     }
