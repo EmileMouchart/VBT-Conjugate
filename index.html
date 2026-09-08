@@ -3,187 +3,91 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Westside Hybrid & VBT Tracker (Direct CCCD)</title>
+  <title>VBT Android Diagnostic</title>
   <style>
-    :root {
-      --bg-color: #0f172a;
-      --card-bg: #1e293b;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --border-color: #334155;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg-color); color: var(--text-main); padding: 16px; max-width: 850px; margin: 0 auto; }
-
-    h1 { margin-bottom: 10px; font-size: 1.5rem; }
-    .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-    
-    label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
-    input, button { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); background: #0f172a; color: var(--text-main); font-size: 0.95rem; margin-bottom: 8px; }
-    button.bt-btn { background: #0284c7; color: white; font-weight: bold; border: none; cursor: pointer; }
-
-    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; display: inline-block; margin-right: 6px; }
-    .status-dot.connected { background: #22c55e; }
-
-    #debugBox {
-      background: #000;
-      color: #00ff66;
-      font-family: monospace;
-      font-size: 0.75rem;
-      padding: 10px;
-      border-radius: 6px;
-      height: 250px;
-      overflow-y: auto;
-      border: 1px solid #334155;
-      white-space: pre-wrap;
-    }
+    body { background: #0f172a; color: #f8fafc; font-family: sans-serif; padding: 16px; }
+    button { width: 100%; padding: 12px; border-radius: 6px; border: none; font-weight: bold; margin-bottom: 8px; cursor: pointer; }
+    .btn-main { background: #0284c7; color: white; }
+    .btn-action { background: #334155; color: #f8fafc; border: 1px solid #475569; }
+    #console { background: #000; color: #00ff66; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 6px; height: 300px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
   </style>
 </head>
 <body>
 
-  <h1>Westside VBT Auto-Connect (Direct CCCD)</h1>
+  <h2>VBT Sensor Android Scanner</h2>
+  <button class="btn-main" onclick="startScan()">1. Verbind & Scan Sensor</button>
+  <button class="btn-action" onclick="forceRead()">2. Lees RX (0003) Handmatig Uit</button>
 
-  <!-- Bluetooth Controller -->
-  <div class="card" style="border: 1px solid #0284c7;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-      <div>
-        <strong style="display: flex; align-items: center;">
-          <span id="btDot" class="status-dot"></span> VBT Sensor ($ENCODE)
-        </strong>
-        <span id="btStatusText" style="font-size: 0.8rem; color: var(--text-muted);">Niet verbonden</span>
-      </div>
-      <button class="bt-btn" style="width: auto; margin: 0;" onclick="connectBluetoothSensor()">
-        ⚡ Koppel Sensor
-      </button>
-    </div>
-  </div>
-
-  <!-- Live Speed Input -->
-  <div class="card">
-    <label>Gemeten Snelheid (m/s)</label>
-    <input type="number" id="inputMetric" placeholder="Trek aan het koord..." step="0.01" style="font-size: 2.2rem; text-align: center; font-weight: bold; color: #38bdf8;">
-  </div>
-
-  <!-- Debug Console -->
-  <div class="card">
-    <h3>🔍 Live Bluetooth Monitor</h3>
-    <div id="debugBox">Verbind de sensor en trek aan het koord...</div>
-  </div>
+  <div id="console">Druk op knop 1 om te starten...</div>
 
   <script>
-    let bleDevice = null;
-    let rxChar = null;
-    let txChar = null;
+    let bleDevice, gattServer, rxChar;
 
-    const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-    const NUS_TX_UUID      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-    const NUS_RX_UUID      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-    const CCCD_UUID        = '00002902-0000-1000-8000-00805f9b34fb';
-
-    const delay = ms => new Promise(res => setTimeout(res, ms));
-
-    function logDebug(msg) {
-      const box = document.getElementById('debugBox');
-      const time = new Date().toLocaleTimeString();
-      box.innerHTML = `[${time}] ${msg}\n` + box.innerHTML;
+    function log(msg) {
+      const el = document.getElementById('console');
+      el.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}\n` + el.innerHTML;
     }
 
-    async function connectBluetoothSensor() {
-      const btStatusText = document.getElementById('btStatusText');
-      const btDot = document.getElementById('btDot');
-
+    async function startScan() {
       try {
-        logDebug("Zoeken naar sensor...");
+        log("Zoeken naar apparaten met 'acceptAllDevices'...");
         bleDevice = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
-          optionalServices: [NUS_SERVICE_UUID]
+          optionalServices: [
+            '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+            '0000fff0-0000-1000-8000-00805f9b34fb',
+            '0000ff12-0000-1000-8000-00805f9b34fb'
+          ]
         });
 
-        logDebug("Verbinden met GATT Server...");
-        const server = await bleDevice.gatt.connect();
+        log("Verbinden met GATT server...");
+        gattServer = await bleDevice.gatt.connect();
 
-        btDot.classList.add('connected');
-        btStatusText.innerText = "Verbonden: " + bleDevice.name;
+        log("Services ophalen...");
+        const services = await gattServer.getPrimaryServices();
+        log(`Gevonden services: ${services.length}`);
 
-        await delay(300);
+        for (const service of services) {
+          log(`\n--> Service UUID: ${service.uuid}`);
+          const chars = await service.getCharacteristics();
+          for (const c of chars) {
+            log(`    - Karakteristiek: ${c.uuid}`);
+            log(`      Eigenschappen: Notify=${c.properties.notify}, Read=${c.properties.read}, Write=${c.properties.write}`);
 
-        // Service ophalen
-        const service = await server.getPrimaryService(NUS_SERVICE_UUID);
-        logDebug("✔️ Service 6e400001 geladen.");
-
-        // 1. RX Kanaal Notificaties instellen
-        rxChar = await service.getCharacteristic(NUS_RX_UUID);
-        rxChar.removeEventListener('characteristicvaluechanged', handleSensorData);
-        rxChar.addEventListener('characteristicvaluechanged', handleSensorData);
-        
-        await rxChar.startNotifications();
-        logDebug("✔️ Standard startNotifications() aangeroepen.");
-
-        // Direct schrijven naar de Descriptor (0x2902) om Android Chrome te dwingen te luisteren
-        try {
-          const descriptor = await rxChar.getDescriptor(CCCD_UUID);
-          await descriptor.writeValue(new Uint8Array([0x01, 0x00]));
-          logDebug("🔥 CCCD Descriptor (2902) geforceerd op [01 00]!");
-        } catch (descErr) {
-          logDebug("ℹ️ Directe CCCD override overgeslagen: " + descErr.message);
+            // Als dit RX (0003) is, koppel notificatie
+            if (c.uuid.includes('6e400003') || c.properties.notify) {
+              rxChar = c;
+              log("    >>> NOTIFY KANAAL GEVONDEN! Abonneren...");
+              c.addEventListener('characteristicvaluechanged', (e) => {
+                let bytes = new Uint8Array(e.target.value.buffer);
+                let hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                log(`🔥 LIVE DATA: [ ${hex} ]`);
+              });
+              await c.startNotifications();
+              log("    >>> Notificaties succesvol geactiveerd!");
+            }
+          }
         }
+        log("\n✅ Scan voltooid. Trek nu aan het koord!");
 
-        await delay(300);
-
-        // 2. TX Kanaal (0002) pings versturen
-        try {
-          txChar = await service.getCharacteristic(NUS_TX_UUID);
-          
-          logDebug("➡️ Activeringscode versturen naar 0002...");
-          await txChar.writeValueWithoutResponse(new Uint8Array([0x01, 0x00]));
-          await delay(150);
-          await txChar.writeValueWithoutResponse(new Uint8Array([0x02]));
-
-          logDebug("🚀 KLAAR! Trek nu stevig aan het koord.");
-
-        } catch(e) {
-          logDebug("⚠️ TX Kanaal fout: " + e.message);
-        }
-
-      } catch (error) {
-        logDebug("❌ FOUT: " + error.message);
-        btStatusText.innerText = "Koppeling mislukt";
-        btDot.classList.remove('connected');
+      } catch (e) {
+        log("❌ FOUT: " + e.message);
       }
     }
 
-    function handleSensorData(event) {
-      const value = event.target.value;
-      let bytes = new Uint8Array(value.buffer);
-      let hexArray = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      
-      logDebug(`🔥 UITSLAAG ONTVANGEN: [ ${hexArray} ]`);
-
-      let inputEl = document.getElementById('inputMetric');
-      let valFloat = null;
-
-      // Conversie van hex naar snelheid
-      if (bytes.length >= 2) {
-        let rawInt = (bytes[0] << 8) | bytes[1];
-        if (rawInt === 0 && bytes.length >= 4) {
-          rawInt = (bytes[2] << 8) | bytes[3];
-        }
-        if (rawInt > 0) {
-          valFloat = rawInt > 500 ? rawInt / 1000.0 : rawInt / 100.0;
-        }
+    async function forceRead() {
+      if (!rxChar) {
+        log("⚠️ Geen actief RX kanaal gevonden.");
+        return;
       }
-
-      if (valFloat === null) {
-        const textVal = new TextDecoder().decode(value).replace(/[^0-9.]/g, '').trim();
-        if (textVal.length > 0 && !isNaN(parseFloat(textVal))) {
-          valFloat = parseFloat(textVal);
-        }
-      }
-
-      if (valFloat !== null && !isNaN(valFloat) && valFloat > 0.05 && valFloat < 5.0) {
-        inputEl.value = valFloat.toFixed(2);
-        logDebug(`>>> SNELHEID VERWERKT: ${valFloat.toFixed(2)} m/s`);
+      try {
+        log("Handmatig 'Read' uitvoeren op RX...");
+        const val = await rxChar.readValue();
+        let bytes = new Uint8Array(val.buffer);
+        let hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        log(`📖 Handmatige Uitlezing: [ ${hex} ]`);
+      } catch(e) {
+        log("❌ Read Mislukt: " + e.message);
       }
     }
   </script>
