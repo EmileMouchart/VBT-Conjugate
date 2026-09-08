@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Westside Hybrid & VBT Tracker</title>
+  <title>Westside Hybrid & VBT Tracker (Android Ready)</title>
   <style>
     :root {
       --bg-color: #0f172a;
@@ -20,7 +20,7 @@
     .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
     
     label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
-    input, button { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: #0f172a; color: var(--text-main); font-size: 0.95rem; margin-bottom: 8px; }
+    input, button { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); background: #0f172a; color: var(--text-main); font-size: 0.95rem; margin-bottom: 8px; }
     button.bt-btn { background: #0284c7; color: white; font-weight: bold; border: none; cursor: pointer; }
     button.sub-btn { background: #334155; color: white; border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; }
 
@@ -36,7 +36,7 @@
       font-size: 0.75rem;
       padding: 10px;
       border-radius: 6px;
-      height: 200px;
+      height: 220px;
       overflow-y: auto;
       border: 1px solid #334155;
       white-space: pre-wrap;
@@ -45,7 +45,7 @@
 </head>
 <body>
 
-  <h1>Westside VBT Auto-Connect ($ENCODE)</h1>
+  <h1>Westside VBT Auto-Connect (Android Fix)</h1>
 
   <!-- Bluetooth Controller -->
   <div class="card" style="border: 1px solid #0284c7;">
@@ -61,9 +61,9 @@
       </button>
     </div>
 
-    <!-- Handmatige Triggers -->
+    <!-- Android Handmatige Triggers -->
     <div class="grid-2" style="margin-top: 10px;">
-      <button class="sub-btn" onclick="sendTrigger([0x01, 0x00])">Stuur 0100 Ping</button>
+      <button class="sub-btn" onclick="sendTrigger([0x01, 0x00])">Stuur 01 00 (Android Ping)</button>
       <button class="sub-btn" onclick="sendTrigger([0x02])">Stuur 02 Ping</button>
     </div>
   </div>
@@ -71,13 +71,13 @@
   <!-- Live Speed Input -->
   <div class="card">
     <label>Gemeten Snelheid (m/s)</label>
-    <input type="number" id="inputMetric" placeholder="Trek aan het koord..." step="0.01" style="font-size: 2rem; text-align: center; font-weight: bold; color: #38bdf8;">
+    <input type="number" id="inputMetric" placeholder="Trek aan het koord..." step="0.01" style="font-size: 2.2rem; text-align: center; font-weight: bold; color: #38bdf8;">
   </div>
 
   <!-- Debug Console -->
   <div class="card">
     <h3>🔍 Live Bluetooth Monitor</h3>
-    <div id="debugBox">Druk op 'Koppel Sensor' om te starten...</div>
+    <div id="debugBox">Zorg dat GPS/Locatie & Bluetooth AAN staan op Android...</div>
   </div>
 
   <script>
@@ -88,6 +88,8 @@
     const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
     const NUS_TX_UUID      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
     const NUS_RX_UUID      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+    const delay = ms => new Promise(res => setTimeout(res, ms));
 
     function logDebug(msg) {
       const box = document.getElementById('debugBox');
@@ -100,48 +102,49 @@
       const btDot = document.getElementById('btDot');
 
       try {
-        logDebug("Zoeken naar $ENCODE sensor...");
+        logDebug("Zoeken naar sensor op Android...");
         bleDevice = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
           optionalServices: [NUS_SERVICE_UUID]
         });
 
-        logDebug("Verbinden met GATT Server...");
+        logDebug("Verbinden met Android GATT Stack...");
         const server = await bleDevice.gatt.connect();
 
         btDot.classList.add('connected');
         btStatusText.innerText = "Verbonden: " + bleDevice.name;
 
+        await delay(500); // Android Handshake Pause
+
         // Service ophalen
         const service = await server.getPrimaryService(NUS_SERVICE_UUID);
-        logDebug("✔️ Service 6e400001 gevonden.");
+        logDebug("✔️ Service 6e400001 geladen.");
 
-        // 1. RX Kanaal Notificaties Activeren
+        // 1. RX Kanaal Notificaties Activeren (0003)
         rxChar = await service.getCharacteristic(NUS_RX_UUID);
         
-        // Event listener koppelen VOORDAT notificaties starten
         rxChar.removeEventListener('characteristicvaluechanged', handleSensorData);
         rxChar.addEventListener('characteristicvaluechanged', handleSensorData);
         
         await rxChar.startNotifications();
-        logDebug("✔️ Notificaties op RX (0003) gestart.");
+        logDebug("✔️ Android Notificaties op RX (0003) actief!");
 
-        // 2. TX Kanaal ophalen en pings sturen
+        await delay(500); // Pauze voor Android Notificatie Bevestiging
+
+        // 2. TX Kanaal (0002) koppelen en pings sturen
         try {
           txChar = await service.getCharacteristic(NUS_TX_UUID);
-          logDebug("✔️ TX (0002) kanaal gekoppeld.");
+          logDebug("✔️ TX (0002) kanaal klaar voor verzending.");
 
-          // Korte pauze voor stabiele handshake
-          await new Promise(r => setTimeout(r, 300));
-
+          // Stuur de exacte triggers die in nRF Connect werkten op Android
           await sendTrigger([0x01, 0x00]);
-          await new Promise(r => setTimeout(r, 100));
+          await delay(200);
           await sendTrigger([0x02]);
 
-          logDebug("🚀 KLAAR! Trek krachtig aan het koord.");
+          logDebug("🚀 KLAAR! Trek nu stevig aan het koord.");
 
         } catch(e) {
-          logDebug("⚠️ Fout bij TX opzetten: " + e.message);
+          logDebug("⚠️ TX Kanaal waarschuwing: " + e.message);
         }
 
       } catch (error) {
@@ -160,7 +163,7 @@
         const data = new Uint8Array(byteArray);
         let hexStr = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ');
         
-        // Probeer Write without response, anders gewone Write
+        // Android vereist 'writeWithoutResponse' voor Nordic UART
         if (txChar.properties.writeWithoutResponse) {
           await txChar.writeValueWithoutResponse(data);
         } else {
@@ -182,7 +185,7 @@
       let inputEl = document.getElementById('inputMetric');
       let valFloat = null;
 
-      // Unpack binary data (High Byte / Low Byte conversie)
+      // Conversie van hex naar snelheid
       if (bytes.length >= 2) {
         let rawInt = (bytes[0] << 8) | bytes[1];
         if (rawInt === 0 && bytes.length >= 4) {
@@ -193,7 +196,6 @@
         }
       }
 
-      // ASCII Fallback
       if (valFloat === null) {
         const textVal = new TextDecoder().decode(value).replace(/[^0-9.]/g, '').trim();
         if (textVal.length > 0 && !isNaN(parseFloat(textVal))) {
