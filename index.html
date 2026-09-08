@@ -464,22 +464,42 @@
       document.getElementById('btStatusText').innerText = "Verbinding verbroken";
     }
 
-    // AANGEPASTE VERWERKING VAN NORDIC UART DATA (ASCII STRINGS)
-    function handleSensorData(event) {
-      const value = event.target.value;
-      const decoder = new TextDecoder('utf-8');
-      const text = decoder.decode(value).trim();
-      
-      console.log("Inkomende raw sensor data:", text);
+function handleSensorData(event) {
+  const value = event.target.value;
+  
+  // 1. Probeer de data als ruwe bytes te lezen (Uint8 array)
+  let bytes = new Uint8Array(value.buffer);
+  console.log("Ruwe bytes van sensor:", Array.from(bytes));
 
-      // Zoek naar getallen in de inkomende tekst
-      const speedMs = parseFloat(text);
+  let speedMs = 0;
 
-      if (!isNaN(speedMs) && speedMs > 0) {
-        document.getElementById('inputMetric').value = speedMs.toFixed(2);
-        checkVelocityDropAlert(speedMs);
-      }
+  // 2. Scenario A: Data komt binnen als 2 bytes (bijv. [0, 85] = 0.85 m/s of mm/s)
+  if (value.byteLength >= 2) {
+    // Probeer 16-bit integer (snelheid in cm/s of mm/s)
+    let rawInt = value.getUint16(0, true); // Little endian
+    
+    if (rawInt > 0 && rawInt < 500) { 
+      // Veronderstel cm/s -> omrekenen naar m/s
+      speedMs = rawInt / 100.0; 
+    } else if (rawInt >= 500 && rawInt < 5000) {
+      // Veronderstel mm/s -> omrekenen naar m/s
+      speedMs = rawInt / 1000.0;
     }
+  }
+
+  // 3. Scenario B: ASCII tekst fallback (voor het geval er toch tekst meekomt)
+  if (speedMs === 0) {
+    const decoder = new TextDecoder('utf-8');
+    const text = decoder.decode(value).replace(/[^0-9.]/g, ''); // Filter alleen cijfers en punten
+    speedMs = parseFloat(text);
+  }
+
+  // 4. Als er een geldige snelheid is berekend, vul deze direct in
+  if (!isNaN(speedMs) && speedMs > 0 && speedMs < 5.0) {
+    document.getElementById('inputMetric').value = speedMs.toFixed(2);
+    checkVelocityDropAlert(speedMs);
+  }
+}
 
     function setMethod(method) {
       currentMethod = method;
