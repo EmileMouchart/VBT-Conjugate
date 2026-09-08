@@ -50,10 +50,6 @@
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border-color); }
     th { color: var(--text-muted); font-weight: normal; }
 
-    .status-ok { color: #4ade80; font-weight: bold; }
-    .status-slow { color: #f87171; font-weight: bold; }
-
-    /* Debug Console Styling */
     #debugBox {
       background: #000;
       color: #00ff66;
@@ -61,7 +57,7 @@
       font-size: 0.75rem;
       padding: 10px;
       border-radius: 6px;
-      height: 120px;
+      height: 140px;
       overflow-y: auto;
       border: 1px solid #334155;
       white-space: pre-wrap;
@@ -77,7 +73,7 @@
     <div style="display: flex; justify-content: space-between; align-items: center;">
       <div>
         <strong style="display: flex; align-items: center; gap: 8px;">
-          <span id="btDot" class="status-dot"></span> VBT Queling Sensor
+          <span id="btDot" class="status-dot"></span> VBT Queling Sensor ($ENCODE)
         </strong>
         <span id="btStatusText" style="font-size: 0.8rem; color: var(--text-muted);">Niet verbonden</span>
       </div>
@@ -184,9 +180,13 @@
     let timerInterval = null;
     let secondsElapsed = 0;
     let currentSessionSets = [];
-    let lastVelocity = null;
     let bleDevice = null;
-    let gattServer = null;
+    let rxChar = null;
+    let txChar = null;
+
+    const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const NUS_TX_UUID      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write to Sensor
+    const NUS_RX_UUID      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Read/Notify from Sensor
 
     function logDebug(msg) {
       const box = document.getElementById('debugBox');
@@ -204,40 +204,37 @@
       }
 
       try {
-        logDebug("Zoeken naar Bluetooth apparaten...");
+        logDebug("Zoeken naar VBT Sensor...");
         bleDevice = await navigator.bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: [
-            '0000180d-0000-1000-8000-00805f9b34fb',
-            '0000180f-0000-1000-8000-00805f9b34fb',
-            '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-            '0000fff0-0000-1000-8000-00805f9b34fb'
-          ]
+          filters: [{ namePrefix: '$ENCODE' }, { namePrefix: 'Queling' }],
+          optionalServices: [NUS_SERVICE_UUID]
         });
 
-        logDebug("Verbinden met: " + bleDevice.name);
-        gattServer = await bleDevice.gatt.connect();
+        logDebug("Verbinden met " + bleDevice.name + "...");
+        const server = await bleDevice.gatt.connect();
 
         btDot.classList.add('connected');
-        btStatusText.innerText = "Verbonden: " + (bleDevice.name || "Sensor");
-        logDebug("GATT Server verbonden. Services ophalen...");
+        btStatusText.innerText = "Verbonden: " + bleDevice.name;
 
-        const services = await gattServer.getPrimaryServices();
-        logDebug(`Gevonden services: ${services.length}`);
+        const service = await server.getPrimaryService(NUS_SERVICE_UUID);
 
-        for (let service of services) {
-          logDebug(`Service UUID: ${service.uuid}`);
-          const characteristics = await service.getCharacteristics();
+        // Notificatie kanaal instellen
+        rxChar = await service.getCharacteristic(NUS_RX_UUID);
+        await rxChar.startNotifications();
+        rxChar.addEventListener('characteristicvaluechanged', handleSensorData);
+        logDebug("Luisteren op RX (6e400003)...");
 
-          for (let char of characteristics) {
-            logDebug(`- Char UUID: ${char.uuid} [N:${char.properties.notify}, R:${char.properties.read}]`);
-
-            if (char.properties.notify) {
-              await char.startNotifications();
-              char.addEventListener('characteristicvaluechanged', handleSensorData);
-              logDebug(`  --> Notificaties AAN voor ${char.uuid.slice(0,8)}`);
-            }
-          }
+        // Activatiecommando versturen naar TX kanaal
+        try {
+          txChar = await service.getCharacteristic(NUS_TX_UUID);
+          logDebug("Activatie signaal versturen naar TX...");
+          
+          // Stuur standaard start-pulsen om de sensor uit slaapstand te halen
+          await txChar.writeValueWithoutResponse(new Uint8Array([0x01]));
+          await txChar.writeValueWithoutResponse(new Uint8Array([0xA5, 0x01, 0x01]));
+          logDebug("Activatie signaal verzonden! Trek aan koord...");
+        } catch(e) {
+          logDebug("TX waarschuwing: " + e.message);
         }
 
       } catch (error) {
@@ -252,29 +249,30 @@
       let bytes = new Uint8Array(value.buffer);
       let hexArray = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
       
-      logDebug(`RAW DATA (${bytes.length} bytes): [ ${hexArray} ]`);
+      logDebug(`DATA BINNEN: [ ${hexArray} ]`);
 
-      // Poging om data om te zetten
       let inputEl = document.getElementById('inputMetric');
       let valFloat = null;
 
-      // 1. Als het een textuele waarde is
+      // Directe ASCII conversie
       const decoder = new TextDecoder('utf-8');
-      const textVal = decoder.decode(value).trim();
-      if (!isNaN(parseFloat(textVal)) && parseFloat(textVal) > 0) {
+      const textVal = decoder.decode(value).replace(/[^0-9.]/g, '').trim();
+      if (textVal.length > 0 && !isNaN(parseFloat(textVal))) {
         valFloat = parseFloat(textVal);
       } 
-      // 2. Als het een 16-bit integer is (vaak vermenigvuldigd met 100 of 1000)
+      // Multi-byte binary parsing
       else if (bytes.length >= 2) {
-        let rawInt = (bytes[1] << 8) | bytes[0];
-        if (rawInt > 0 && rawInt < 5000) {
-          valFloat = rawInt / 100.0;
+        let rawInt = (bytes[0] << 8) | bytes[1];
+        if (rawInt > 0) {
+          valFloat = rawInt > 100 ? rawInt / 1000.0 : rawInt / 100.0;
         }
+      } else if (bytes.length === 1 && bytes[0] > 0) {
+        valFloat = bytes[0] / 100.0;
       }
 
-      if (valFloat && valFloat < 5.0) {
+      if (valFloat !== null && !isNaN(valFloat) && valFloat < 5.0) {
         inputEl.value = valFloat.toFixed(2);
-        logDebug(`>>> HERKEND ALS SNELHEID: ${valFloat.toFixed(2)} m/s`);
+        logDebug(`>>> SNELHEID DETECTIE: ${valFloat.toFixed(2)} m/s`);
       }
     }
 
@@ -299,14 +297,8 @@
       document.getElementById('logSetBtn').disabled = !workoutActive;
     }
 
-    function logSet() {
-      // Set log functionaliteit
-    }
-
-    function endWorkout() {
-      alert("Workout beëindigd.");
-    }
-
+    function logSet() {}
+    function endWorkout() { alert("Workout beëindigd."); }
     function setMethod(m) { currentMethod = m; }
     function updateTargetProfile() {}
   </script>
