@@ -389,12 +389,11 @@
       document.getElementById('restTimerDisplay').innerText = `${mins}:${secs}`;
     }
 
-    // Bluetooth Variables
+    // Bluetooth Variables & UUID Specs
     let bleDevice = null;
     let gattServer = null;
 
     const VBT_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-    const VBT_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
     let exercises = JSON.parse(localStorage.getItem('westside_exercises')) || {
       "Floor Press (PAP Base)": {
@@ -427,19 +426,19 @@
       const btDot = document.getElementById('btDot');
 
       if (!navigator.bluetooth) {
-        alert("Web Bluetooth wordt niet ondersteund door deze browser. Gebruik Chrome op Android/PC, of de WebBLE/Bluefy app op iOS.");
+        alert("Web Bluetooth wordt niet ondersteund. Gebruik Chrome op Android/PC, of de WebBLE/Bluefy app op iOS.");
         return;
       }
 
       try {
-        btStatusText.innerText = "Zoeken naar Queling sensor...";
+        btStatusText.innerText = "Zoeken naar sensor...";
         
         bleDevice = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
-          optionalServices: [VBT_SERVICE_UUID, 'battery_service']
+          optionalServices: [VBT_SERVICE_UUID, '0000180d-0000-1000-8000-00805f9b34fb']
         });
 
-        btStatusText.innerText = "Verbinden met " + bleDevice.name + "...";
+        btStatusText.innerText = "Verbinden met " + (bleDevice.name || "Sensor") + "...";
         gattServer = await bleDevice.gatt.connect();
 
         btDot.classList.add('connected');
@@ -447,10 +446,29 @@
 
         bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
-        const service = await gattServer.getPrimaryService(VBT_SERVICE_UUID);
-        const characteristic = await service.getCharacteristic(VBT_CHARACTERISTIC_UUID);
-        await characteristic.startNotifications();
-        characteristic.addEventListener('characteristicvaluechanged', handleSensorData);
+        // Ontvang alle primaire services om notificaties in te schakelen
+        const services = await gattServer.getPrimaryServices();
+
+        for (let service of services) {
+          const characteristics = await service.getCharacteristics();
+          for (let char of characteristics) {
+            // Luister actief naar alle notificatie kanalen
+            if (char.properties.notify) {
+              await char.startNotifications();
+              char.addEventListener('characteristicvaluechanged', handleSensorData);
+            }
+            // Stuur een activatie signaal naar de schrijf-kanalen
+            if (char.properties.write || char.properties.writeWithoutResponse) {
+              try {
+                await char.writeValue(new Uint8Array([0x01]));
+              } catch(e) {
+                console.log("Schrijffout negeren:", e);
+              }
+            }
+          }
+        }
+
+        document.getElementById('inputMetric').placeholder = "Actief! Trek aan koord...";
 
       } catch (error) {
         console.error("Bluetooth Fout:", error);
@@ -462,51 +480,46 @@
     function onDisconnected() {
       document.getElementById('btDot').classList.remove('connected');
       document.getElementById('btStatusText').innerText = "Verbinding verbroken";
+      document.getElementById('inputMetric').placeholder = "Live via Sensor...";
     }
 
-function handleSensorData(event) {
-  const value = event.target.value;
-  const inputEl = document.getElementById('inputMetric');
-  
-  // Maak een array van alle losse bytes die binnenkomen
-  let bytes = new Uint8Array(value.buffer);
-  
-  // TEST: Laat direct in het vakje zien dat er data BINNENKOMT (zo weet je dat de trigger werkt!)
-  console.log("Raw sensor bytes:", Array.from(bytes));
+    function handleSensorData(event) {
+      const value = event.target.value;
+      const inputEl = document.getElementById('inputMetric');
+      
+      let bytes = new Uint8Array(value.buffer);
+      let detectedSpeed = null;
 
-  let detectedSpeed = null;
+      // 1. Probeer ASCII-string decodering
+      const decoder = new TextDecoder('utf-8');
+      const textVal = decoder.decode(value).replace(/[^0-9.]/g, '').trim();
+      
+      if (textVal.length > 0 && !isNaN(parseFloat(textVal))) {
+        detectedSpeed = parseFloat(textVal);
+      }
 
-  // Optie A: Probeer te lezen als ASCII tekst (bijv. "0.75")
-  const decoder = new TextDecoder('utf-8');
-  const textVal = decoder.decode(value).trim();
-  if (!isNaN(parseFloat(textVal))) {
-    detectedSpeed = parseFloat(textVal);
-  }
+      // 2. Fallback: Ruwe binary byte parsing
+      if ((detectedSpeed === null || isNaN(detectedSpeed)) && bytes.length > 0) {
+        for (let b of bytes) {
+          if (b > 0) {
+            detectedSpeed = b > 20 ? b / 100.0 : b;
+            break;
+          }
+        }
+      }
 
-  // Optie B: Probeer te lezen als ruwe getallen (bijv. 75 = 0.75 m/s)
-  if (detectedSpeed === null && bytes.length > 0) {
-    // Neem de eerste niet-nul byte
-    for (let b of bytes) {
-      if (b > 0) {
-        detectedSpeed = b > 20 ? b / 100.0 : b; // Als b=75 -> 0.75 m/s
-        break;
+      // 3. Vul het veld direct automatisch in bij detectie
+      if (detectedSpeed !== null && !isNaN(detectedSpeed) && detectedSpeed > 0) {
+        inputEl.value = detectedSpeed.toFixed(2);
+        
+        // Korte visuele feedback (flitst lichtblauw als er data binnenkomt)
+        inputEl.style.backgroundColor = '#1e3a5f';
+        setTimeout(() => inputEl.style.backgroundColor = '#0f172a', 300);
+
+        checkVelocityDropAlert(detectedSpeed);
       }
     }
-  }
 
-  // Schrijf het resultaat DIRECT in het invoerveld
-  if (detectedSpeed !== null) {
-    inputEl.value = detectedSpeed.toFixed(2);
-    inputEl.style.backgroundColor = '#1e3a5f'; // Korte visuele 'flash' dat er data is verwerkt
-    setTimeout(() => inputEl.style.backgroundColor = '#0f172a', 300);
-
-    // Controleer de velocity drop
-    checkVelocityDropAlert(detectedSpeed);
-  } else {
-    // Laat zien dat er wél data is ontvangen, maar dat het 0 was
-    inputEl.placeholder = "Data ontvangen (" + bytes.length + " bytes)...";
-  }
-}
     function setMethod(method) {
       currentMethod = method;
       document.querySelectorAll('.tab-btn').forEach(btn => {
