@@ -3,35 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VBT Android Diagnostic</title>
+  <title>VBT Raw BLE Dump</title>
   <style>
     body { background: #0f172a; color: #f8fafc; font-family: sans-serif; padding: 16px; }
-    button { width: 100%; padding: 12px; border-radius: 6px; border: none; font-weight: bold; margin-bottom: 8px; cursor: pointer; }
-    .btn-main { background: #0284c7; color: white; }
-    .btn-action { background: #334155; color: #f8fafc; border: 1px solid #475569; }
-    #console { background: #000; color: #00ff66; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 6px; height: 300px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+    button { width: 100%; padding: 14px; border-radius: 8px; border: none; font-weight: bold; background: #0284c7; color: white; margin-bottom: 12px; font-size: 1rem; }
+    #log { background: #000; color: #00ff66; font-family: monospace; font-size: 0.75rem; padding: 12px; border-radius: 6px; height: 350px; overflow-y: auto; white-space: pre-wrap; }
   </style>
 </head>
 <body>
 
-  <h2>VBT Sensor Android Scanner</h2>
-  <button class="btn-main" onclick="startScan()">1. Verbind & Scan Sensor</button>
-  <button class="btn-action" onclick="forceRead()">2. Lees RX (0003) Handmatig Uit</button>
-
-  <div id="console">Druk op knop 1 om te starten...</div>
+  <h2>VBT Raw BLE Receiver</h2>
+  <button onclick="connectAndListen()">⚡ Verbind & Scan Alle Kanalen</button>
+  <div id="log">Status: Klaar om te verbinden...</div>
 
   <script>
-    let bleDevice, gattServer, rxChar;
-
-    function log(msg) {
-      const el = document.getElementById('console');
-      el.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}\n` + el.innerHTML;
+    function print(msg) {
+      const logEl = document.getElementById('log');
+      logEl.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}\n` + logEl.innerHTML;
     }
 
-    async function startScan() {
+    async function connectAndListen() {
       try {
-        log("Zoeken naar apparaten met 'acceptAllDevices'...");
-        bleDevice = await navigator.bluetooth.requestDevice({
+        print("Zoeken naar alle BLE apparaten...");
+        
+        // Vraag om apparaat zonder service-filter om Chrome blokkades te vermijden
+        const device = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
           optionalServices: [
             '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
@@ -40,54 +36,48 @@
           ]
         });
 
-        log("Verbinden met GATT server...");
-        gattServer = await bleDevice.gatt.connect();
+        print(`Gekoppeld aan: ${device.name || 'Onbekend'}`);
+        const server = await device.gatt.connect();
+        print("GATT Server verbonden. Ophalen van primaire services...");
 
-        log("Services ophalen...");
-        const services = await gattServer.getPrimaryServices();
-        log(`Gevonden services: ${services.length}`);
+        const services = await server.getPrimaryServices();
+        print(`Aantal gevonden services: ${services.length}`);
+
+        let activeListeners = 0;
 
         for (const service of services) {
-          log(`\n--> Service UUID: ${service.uuid}`);
-          const chars = await service.getCharacteristics();
-          for (const c of chars) {
-            log(`    - Karakteristiek: ${c.uuid}`);
-            log(`      Eigenschappen: Notify=${c.properties.notify}, Read=${c.properties.read}, Write=${c.properties.write}`);
+          print(`Service: ${service.uuid}`);
+          const characteristics = await service.getCharacteristics();
 
-            // Als dit RX (0003) is, koppel notificatie
-            if (c.uuid.includes('6e400003') || c.properties.notify) {
-              rxChar = c;
-              log("    >>> NOTIFY KANAAL GEVONDEN! Abonneren...");
-              c.addEventListener('characteristicvaluechanged', (e) => {
-                let bytes = new Uint8Array(e.target.value.buffer);
-                let hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-                log(`🔥 LIVE DATA: [ ${hex} ]`);
-              });
-              await c.startNotifications();
-              log("    >>> Notificaties succesvol geactiveerd!");
+          for (const c of characteristics) {
+            print(`  ↳ Char: ${c.uuid} | Properties: Notify=${c.properties.notify}, Write=${c.properties.write}`);
+
+            // Activeer notificaties op elk kanaal dat het ondersteunt
+            if (c.properties.notify) {
+              try {
+                await c.startNotifications();
+                c.addEventListener('characteristicvaluechanged', (e) => {
+                  let bytes = new Uint8Array(e.target.value.buffer);
+                  let hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                  print(`🔥 DATA OP [${c.uuid.substring(0,8)}]: ${hex}`);
+                });
+                print(`    ✅ Notificaties AAN op ${c.uuid.substring(0,8)}`);
+                activeListeners++;
+              } catch (err) {
+                print(`    ❌ Notificatie mislukt op ${c.uuid.substring(0,8)}: ${err.message}`);
+              }
             }
           }
         }
-        log("\n✅ Scan voltooid. Trek nu aan het koord!");
+
+        if (activeListeners > 0) {
+          print(`\n🚀 Succesvol geabonneerd op ${activeListeners} kanalen. Trek NU aan het koord!`);
+        } else {
+          print("\n⚠️ Geen enkel notificatiekanaal kunnen activeren.");
+        }
 
       } catch (e) {
-        log("❌ FOUT: " + e.message);
-      }
-    }
-
-    async function forceRead() {
-      if (!rxChar) {
-        log("⚠️ Geen actief RX kanaal gevonden.");
-        return;
-      }
-      try {
-        log("Handmatig 'Read' uitvoeren op RX...");
-        const val = await rxChar.readValue();
-        let bytes = new Uint8Array(val.buffer);
-        let hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-        log(`📖 Handmatige Uitlezing: [ ${hex} ]`);
-      } catch(e) {
-        log("❌ Read Mislukt: " + e.message);
+        print(`❌ FOUT: ${e.message}`);
       }
     }
   </script>
